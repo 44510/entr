@@ -22,6 +22,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl acdnprsz
+.Op Fl signal_name
 .Ar utility
 .Op Ar argument /_ ...
 .Sh DESCRIPTION
@@ -84,6 +85,14 @@ waits for the
 .Ar utility
 to exit to ensure that resources such as sockets have been closed.
 Control of the TTY is not transferred to the child process.
+An alternate signal may be specified by adding
+.Fl HUP ,
+.Fl QUIT ,
+.Fl INT ,
+.Fl TERM ,
+or
+.Fl USR1
+as the last argument.
 .It Fl s
 Evaluate the first argument using the interpreter specified by the
 .Ev SHELL

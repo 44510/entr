@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/event.h>
 
+#include <ctype.h>
 #include <dirent.h>
 #include <err.h>
 #include <errno.h>
@@ -64,6 +65,7 @@ int noninteractive_opt;
 int oneshot_opt;
 int postpone_opt;
 int restart_opt;
+int restart_signal = SIGTERM;
 int shell_opt;
 
 int termios_set;
@@ -216,7 +218,7 @@ main(int argc, char *argv[]) {
 void
 usage() {
 	fprintf(stderr, "release: %s\n", RELEASE);
-	fprintf(stderr, "usage: entr [-acdnprsz] utility [argument [/_] ...] < filenames\n");
+	fprintf(stderr, "usage: entr [-acdnprsz] [-signal_name] utility [argument [/_] ...] < filenames\n");
 	exit(1);
 }
 
@@ -227,7 +229,7 @@ terminate_utility() {
 	terminating = 1;
 
 	if (child_pid > 0) {
-		killpg(child_pid, SIGTERM);
+		killpg(child_pid, restart_signal);
 		waitpid(child_pid, &status, 0);
 		child_pid = 0;
 	}
@@ -367,10 +369,35 @@ int
 set_options(char *argv[]) {
 	int ch;
 	int argc;
+	int extra_args = 0;
+	char *last_arg;
 
 	/* read arguments until we reach a command */
 	for (argc=1; argv[argc] != 0 && argv[argc][0] == '-'; argc++);
-	while ((ch = getopt(argc, argv, "acdnprsz")) != -1) {
+
+	/* non-standard arguments at the end */
+	last_arg = argv[argc-1];
+	if (isupper(last_arg[1]) && strlen(last_arg) > 3) {
+		extra_args++;
+
+		if (strcmp(last_arg, "-HUP") == 0)
+			restart_signal = SIGHUP;
+		else if (strcmp(last_arg, "-INT") == 0)
+			restart_signal = SIGINT;
+		else if (strcmp(last_arg, "-QUIT") == 0)
+			restart_signal = SIGQUIT;
+		else if (strcmp(last_arg, "-TERM") == 0)
+			restart_signal = SIGTERM;
+		else if (strcmp(last_arg, "-USR1") == 0)
+			restart_signal = SIGUSR1;
+		else {
+			warnx("Unknown signal: %s", last_arg);
+			usage();
+		}
+	}
+
+	/* scan normal arguments */
+	while ((ch = getopt(argc - extra_args, argv, "acdnprsz")) != -1) {
 		switch (ch) {
 		case 'a':
 			aggressive_opt = 1;
@@ -400,16 +427,21 @@ set_options(char *argv[]) {
 			usage();
 		}
 	}
+
+	return optind += extra_args;
+
 	if (argv[optind] == 0)
 		usage();
+
 	if ((shell_opt == 1) && (argv[optind+1] != 0))
 		errx(1, "-s requires commands to be formatted as a single argument");
+
 	return optind;
 }
 
 /*
  * Execute the program supplied on the command line. If restart was set
- * then send the child process SIGTERM and restart it.
+ * then signal the child process and restart it.
  */
 void
 run_utility(char *argv[]) {
