@@ -65,6 +65,7 @@ int oneshot_opt;
 int postpone_opt;
 int restart_opt;
 int shell_opt;
+int timeout_arg;
 
 int termios_set;
 struct termios canonical_tty;
@@ -216,20 +217,34 @@ main(int argc, char *argv[]) {
 void
 usage() {
 	fprintf(stderr, "release: %s\n", RELEASE);
-	fprintf(stderr, "usage: entr [-acdnprsz] utility [argument [/_] ...] < filenames\n");
+	fprintf(stderr, "usage: entr [-acdnprsz] [-t timeout] utility [argument [/_] ...] < filenames\n");
 	exit(1);
 }
 
 void
 terminate_utility() {
 	int status;
+	pid_t timeout_pid = 0;
 
 	terminating = 1;
 
 	if (child_pid > 0) {
+		if (timeout_arg > 0) {
+			timeout_pid = fork();
+			if (timeout_pid == 0) {
+				sleep(timeout_arg);
+				exit(0);
+			}
+		}
 		killpg(child_pid, SIGTERM);
 		waitpid(child_pid, &status, 0);
 		child_pid = 0;
+
+		if (timeout_arg > 0) {
+			if (timeout_pid > 0) {
+				kill(timeout_pid, SIGKILL);
+			}
+		}
 	}
 
 	terminating = 0;
@@ -367,10 +382,23 @@ int
 set_options(char *argv[]) {
 	int ch;
 	int argc;
+	int iterations;
+	const char *errstr;
 
 	/* read arguments until we reach a command */
-	for (argc=1; argv[argc] != 0 && argv[argc][0] == '-'; argc++);
-	while ((ch = getopt(argc, argv, "acdnprsz")) != -1) {
+	argc = 1;
+	while (argv[argc] != 0 && argv[argc][0] == '-') {
+		ch = argv[argc][1];
+		switch (ch) {
+		case 't':
+			argc += 2;
+			break;
+		default:
+			argc += 1;
+			break;
+		 }
+	}
+	while ((ch = getopt(argc, argv, "acdnprszt:")) != -1) {
 		switch (ch) {
 		case 'a':
 			aggressive_opt = 1;
@@ -396,12 +424,19 @@ set_options(char *argv[]) {
 		case 'z':
 			oneshot_opt = 1;
 			break;
+		case 't':
+			timeout_arg = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr != NULL)
+				errx(1, "timeout %s: %s", errstr, optarg);
+			break;
 		default:
 			usage();
 		}
 	}
 	if (argv[optind] == 0)
 		usage();
+	if (timeout_arg > 0 && restart_opt == 0)
+		errx(1, "timeout may only be set for restart mode");
 	if ((shell_opt == 1) && (argv[optind+1] != 0))
 		errx(1, "-s requires commands to be formatted as a single argument");
 	return optind;
